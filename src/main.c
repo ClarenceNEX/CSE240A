@@ -69,7 +69,6 @@ read_branch(uint32_t *pc, uint8_t *outcome)
   if (getline(&buf, &len, stream) == -1) {
     return 0;
   }
-
   uint32_t tmp;
   sscanf(buf,"0x%x %d\n",pc,&tmp);
   *outcome = tmp;
@@ -104,7 +103,6 @@ main(int argc, char *argv[])
 
   // Initialize the predictor
   init_predictor();
-
   uint32_t num_branches = 0;
   uint32_t mispredictions = 0;
   uint32_t pc = 0;
