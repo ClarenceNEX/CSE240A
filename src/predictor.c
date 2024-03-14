@@ -125,7 +125,7 @@ make_prediction(uint32_t pc)
       } else {
         return NOTTAKEN;
       }}
-    case TOURNAMENT:
+    case TOURNAMENT:{
         // local pht
         uint32_t cur_local_instruction = pc & ((1<<pcIndexBits) - 1);
         uint32_t clip_local_history = lht[cur_local_instruction] &((1 << lhistoryBits)-1);
@@ -137,7 +137,7 @@ make_prediction(uint32_t pc)
 
         // the selector will choose whom to believe based on the bistory performance 
         return selector[g_pht_index] > WN ? global_prediction : local_prediction;
-
+    }
     case CUSTOM:
     default:
       break;
