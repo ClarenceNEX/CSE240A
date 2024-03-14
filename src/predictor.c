@@ -50,6 +50,12 @@ uint8_t *l_pht;
 
 uint8_t *selector;
 
+// Perceptron Table
+int **perceptronTable;
+
+// Global history register
+uint32_t global_history;
+
 //------------------------------------//
 //        Predictor Functions         //
 //------------------------------------//
@@ -73,8 +79,6 @@ init_predictor()
     g_pht[i] = WN;  
   }
 
-
-
   // below is special for TOURNAMENT
 
   // we should keep 2^pcIndexBits possible instructions, every local instructions will have a corresponding local history
@@ -97,7 +101,16 @@ init_predictor()
     selector[i] = WN;  
   }
 
-
+  // below is for perceptron
+  // Initialize Perceptron Table
+  uint32_t numPerceptrons = 1 << pcIndexBits;
+  perceptronTable = (int **)malloc(numPerceptrons * sizeof(int *));
+  for (int i = 0; i < numPerceptrons; i++) {
+    perceptronTable[i] = (int *)malloc((ghistoryBits + 1) * sizeof(int)); // +1 for bias weight
+    for (int j = 0; j <= ghistoryBits; j++) {
+      perceptronTable[i][j] = 0; // Initialize weights to 0
+    }
+  }
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
@@ -138,7 +151,25 @@ make_prediction(uint32_t pc)
         // the selector will choose whom to believe based on the bistory performance 
         return selector[g_pht_index] > WN ? global_prediction : local_prediction;
     }
-    case CUSTOM:
+    case CUSTOM:{
+      // Compute perceptron index
+      uint32_t numPerceptrons = 1 << pcIndexBits;
+      int perceptronIndex = pc % numPerceptrons;
+
+      // Compute the dot product of GHR and perceptron weights
+      int sum = perceptronTable[perceptronIndex][0]; // bias weight
+      for (int i = 1; i <= ghistoryBits; i++) {
+        if (((global_history >> (i - 1)) & 1) == 1) {
+          sum += perceptronTable[perceptronIndex][i];
+        } else {
+          sum -= perceptronTable[perceptronIndex][i];
+        }
+      }
+
+      // Prediction: taken if sum is greater than 0, not taken otherwise
+      return (sum >= 0) ? TAKEN : NOTTAKEN;
+    }
+      
     default:
       break;
   }
@@ -203,5 +234,34 @@ train_predictor(uint32_t pc, uint8_t outcome)
           if(local_prediction==outcome){ selector[g_pht_index] = selector[g_pht_index] > SN ? selector[g_pht_index] - 1: selector[g_pht_index];}
           else{selector[g_pht_index] = selector[g_pht_index] < ST ? selector[g_pht_index] + 1: selector[g_pht_index];}
       }
+  }
+  else if (bpType == CUSTOM){
+    uint32_t numPerceptrons = 1 << pcIndexBits;
+    // Convert outcome to perceptron target -1 or 1
+    int t = outcome == TAKEN ? 1 : -1;
+    
+    // Compute perceptron index
+    int perceptronIndex = pc % numPerceptrons;
+    
+    // Compute the dot product of GHR and perceptron weights
+    int y_out = perceptronTable[perceptronIndex][0]; // bias weight
+    for (int i = 1; i <= ghistoryBits; i++) {
+        int xi = ((global_history >> (i - 1)) & 1) ? 1 : -1;
+        y_out += xi * perceptronTable[perceptronIndex][i];
+    }
+    
+    // Train if the output sign does not match the actual outcome or if it's not confident
+    int theta = 1.93 * ghistoryBits + 14;
+    if (y_out * t < 0 || abs(y_out) <= theta) {
+        // Update the weights
+        perceptronTable[perceptronIndex][0] += t; // Update bias weight
+        for (int i = 1; i <= ghistoryBits; i++) {
+            int xi = ((global_history >> (i - 1)) & 1) ? 1 : -1;
+            perceptronTable[perceptronIndex][i] += t * xi;
+        }
+    }
+    
+    // Update global history to include the most recent outcome
+    global_history = ((global_history << 1) | (outcome == TAKEN ? 1 : 0)) & ((1 << ghistoryBits) - 1);
   }
 }
