@@ -7,7 +7,7 @@
 //========================================================//
 #include <stdio.h>
 #include "predictor.h"
-
+#include <string.h>
 //
 // TODO:Student Information
 //
@@ -40,7 +40,15 @@ int verbose;
 uint32_t global_history;
 
 // Pattern History Table
-uint8_t *pht;
+uint8_t *g_pht;
+
+// this is local history table, it contains mutiple local pattern history table for different local branches
+uint32_t *lht;
+
+// local pattern table 
+uint8_t *l_pht;
+
+uint8_t *selector;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -59,11 +67,37 @@ init_predictor()
 
   // Initialize Pattern History Table
   // The size of PHT is 2^ghistoryBits
-  int pht_size = 1 << ghistoryBits;
-  pht = (uint8_t *)malloc(pht_size * sizeof(uint8_t));
-  for (int i = 0; i < pht_size; i++) {
-    pht[i] = WN;  // Initialize to weakly not taken
+  int g_pht_size = 1 << ghistoryBits;
+  g_pht = (uint8_t *)malloc(g_pht_size * sizeof(uint8_t));
+  for (int i = 0; i < g_pht_size; i++) {
+    g_pht[i] = WN;  
   }
+
+
+
+  // below is special for TOURNAMENT
+
+  // we should keep 2^pcIndexBits possible instructions, every local instructions will have a corresponding local history
+  uint32_t num_ins = 1 << pcIndexBits;
+  lht = (uint32_t*)malloc(num_ins*sizeof(uint32_t)); 
+  memset(lht, 0, num_ins*sizeof(uint32_t));
+
+  // For all kinds of local history, we should give a result taken/not taken
+  uint32_t num_local_history = 1 << lhistoryBits;
+  l_pht = (uint8_t*)malloc(num_local_history*sizeof(uint8_t));
+  for (int i = 0; i < num_local_history; i++) {
+    // As the instruction given, we need to initialize to wn
+    l_pht[i] = WN;  
+  };
+
+  uint32_t selector_size = 1<<ghistoryBits;
+  selector = (uint8_t *)malloc(selector_size*sizeof(uint8_t));
+    for (int i = 0; i < selector_size; i++) {
+    // as instruction given, this should also be a two bit counter
+    selector[i] = WN;  
+  }
+
+
 }
 
 // Make a prediction for conditional branch instruction at PC 'pc'
@@ -83,15 +117,27 @@ make_prediction(uint32_t pc)
       return TAKEN;
     case GSHARE:{
       // Compute index for PHT using XOR of PC and global history
-      uint32_t pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
+      uint32_t g_pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
 
       // Predict taken if the counter is WT or ST, not taken otherwise
-      if (pht[pht_index] > WN) {
+      if (g_pht[g_pht_index] > WN) {
         return TAKEN;
       } else {
         return NOTTAKEN;
       }}
     case TOURNAMENT:
+        // local pht
+        uint32_t cur_local_instruction = pc & ((1<<pcIndexBits) - 1);
+        uint32_t clip_local_history = lht[cur_local_instruction] &((1 << lhistoryBits)-1);
+        uint8_t local_prediction = l_pht[clip_local_history] > WN ? TAKEN: NOTTAKEN;
+
+        // global 
+        uint32_t g_pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
+        uint8_t global_prediction = g_pht[g_pht_index] > WN ? TAKEN: NOTTAKEN;
+
+        // the selector will choose whom to believe based on the bistory performance 
+        return selector[g_pht_index] > WN ? global_prediction : local_prediction;
+
     case CUSTOM:
     default:
       break;
@@ -111,22 +157,51 @@ train_predictor(uint32_t pc, uint8_t outcome)
   //
   //TODO: Implement Predictor training
   //
-    if (bpType == GSHARE) {
-    // Compute index for PHT using XOR of PC and global history
-    uint32_t pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
+  if (bpType == GSHARE) {
+      // Compute index for PHT using XOR of PC and global history
+      uint32_t g_pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
 
-    // Update the pattern history table based on outcome
-    if (outcome == TAKEN) {
-      if (pht[pht_index] < ST) {
-        pht[pht_index]++;
+      // Update the pattern history table based on outcome
+      if (outcome == TAKEN) {
+        if (g_pht[g_pht_index] < ST) {
+          g_pht[g_pht_index]++;
+        }
+      } else {
+        if (g_pht[g_pht_index] > SN) {
+          g_pht[g_pht_index]--;
+        }
       }
-    } else {
-      if (pht[pht_index] > SN) {
-        pht[pht_index]--;
-      }
-    }
 
-    // Update global history register
-    global_history = ((global_history << 1) | outcome) & ((1 << ghistoryBits) - 1);
+      // Update global history register
+      global_history = ((global_history << 1) | outcome) & ((1 << ghistoryBits) - 1);
+  }
+  
+  else if (bpType == TOURNAMENT){
+      uint32_t cur_local_instruction = pc & ((1<<pcIndexBits) - 1);
+      uint32_t clip_local_history = lht[cur_local_instruction] &((1 << lhistoryBits)-1);
+      uint32_t g_pht_index = (pc ^ global_history) & ((1 << ghistoryBits) - 1);
+
+      // get the last round prediction before updating their value
+      uint8_t local_prediction = l_pht[clip_local_history] > WN ? TAKEN : NOTTAKEN;
+      uint8_t global_prediction = g_pht[g_pht_index] > WN ? TAKEN : NOTTAKEN;
+
+      // add the new history to postfix and only keep the useful history part
+      lht[cur_local_instruction] = ((lht[cur_local_instruction] << 1) | outcome) & ((1 << lhistoryBits) - 1);
+
+      // update the local based on outcome
+      if (outcome == TAKEN){l_pht[clip_local_history] = l_pht[clip_local_history] < ST ? l_pht[clip_local_history]+1 : l_pht[clip_local_history];}
+      else{l_pht[clip_local_history] = l_pht[clip_local_history] > SN ? l_pht[clip_local_history]-1 : l_pht[clip_local_history];}
+
+
+      // Same logic for update the global pht
+      if (outcome == TAKEN) {if (g_pht[g_pht_index] < ST) {g_pht[g_pht_index]++;}} 
+      else {if (g_pht[g_pht_index] > SN) {g_pht[g_pht_index]--;}}
+      global_history = ((global_history << 1) | outcome) & ((1 << ghistoryBits) - 1);
+
+      // update the selector only when local and global gives different result
+      if (local_prediction != global_prediction){
+          if(local_prediction==outcome){ selector[g_pht_index] = selector[g_pht_index] > SN ? selector[g_pht_index] - 1: selector[g_pht_index];}
+          else{selector[g_pht_index] = selector[g_pht_index] < ST ? selector[g_pht_index] + 1: selector[g_pht_index];}
+      }
   }
 }
