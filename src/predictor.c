@@ -252,7 +252,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
     
     // Train if the output sign does not match the actual outcome or if it's not confident
     int theta = 1.93 * ghistoryBits + 14;
-    if (y_out * t < 0 || abs(y_out) <= theta) {
+    if (y_out * t <= 0 || abs(y_out) <= theta) {
         // Update the weights
         perceptronTable[perceptronIndex][0] += t; // Update bias weight
         for (int i = 1; i <= ghistoryBits; i++) {
