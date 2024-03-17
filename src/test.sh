@@ -21,8 +21,8 @@ run_predictor() {
 
 # Test different branch prediction schemes
 run_predictor --static
-run_predictor --gshare:8
-run_predictor --tournament:8:8:8
-run_predictor --custom:32:32:32
+run_predictor --gshare:13
+run_predictor --tournament:9:10:10
+run_predictor --custom:13:13:13
 
 echo "Tests completed."

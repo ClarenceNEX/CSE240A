@@ -53,8 +53,6 @@ uint8_t *selector;
 // Perceptron Table
 int **perceptronTable;
 
-// Global history register
-uint32_t global_history;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -109,6 +107,10 @@ init_predictor()
     perceptronTable[i] = (int *)malloc((ghistoryBits + 1) * sizeof(int)); // +1 for bias weight
     for (int j = 0; j <= ghistoryBits; j++) {
       perceptronTable[i][j] = 0; // Initialize weights to 0
+      if (j == ghistoryBits){
+        // initilize the bias to -1 such as the predicator could have a small preference at beginning
+        perceptronTable[i][j] += -1;
+      }
     }
   }
 }
@@ -157,9 +159,9 @@ make_prediction(uint32_t pc)
       int perceptronIndex = pc % numPerceptrons;
 
       // Compute the dot product of GHR and perceptron weights
-      int sum = perceptronTable[perceptronIndex][0]; // bias weight
-      for (int i = 1; i <= ghistoryBits; i++) {
-        if (((global_history >> (i - 1)) & 1) == 1) {
+      int sum = perceptronTable[perceptronIndex][ghistoryBits]; // bias weight
+      for (int i = 0; i < ghistoryBits; i++) {
+        if (((global_history >> i) & 1) == 1) {
           sum += perceptronTable[perceptronIndex][i];
         } else {
           sum -= perceptronTable[perceptronIndex][i];
@@ -244,20 +246,27 @@ train_predictor(uint32_t pc, uint8_t outcome)
     int perceptronIndex = pc % numPerceptrons;
     
     // Compute the dot product of GHR and perceptron weights
-    int y_out = perceptronTable[perceptronIndex][0]; // bias weight
-    for (int i = 1; i <= ghistoryBits; i++) {
-        int xi = ((global_history >> (i - 1)) & 1) ? 1 : -1;
-        y_out += xi * perceptronTable[perceptronIndex][i];
+    int y_out = perceptronTable[perceptronIndex][ghistoryBits]; // bias weight
+    for (int i = 0; i < ghistoryBits; i++) {
+        if (((global_history >> i) & 1) == 1) {
+          y_out += perceptronTable[perceptronIndex][i];
+        } else {
+          y_out -= perceptronTable[perceptronIndex][i];
+        }
     }
     
     // Train if the output sign does not match the actual outcome or if it's not confident
     int theta = 1.93 * ghistoryBits + 14;
-    if (y_out * t <= 0 || abs(y_out) <= theta) {
-        // Update the weights
-        perceptronTable[perceptronIndex][0] += t; // Update bias weight
-        for (int i = 1; i <= ghistoryBits; i++) {
-            int xi = ((global_history >> (i - 1)) & 1) ? 1 : -1;
-            perceptronTable[perceptronIndex][i] += t * xi;
+    int sign_y_out = (y_out > 0) ? 1 : (y_out < 0) ? -1 : 0;
+
+    if (sign_y_out != t || abs(y_out) <= theta) {
+
+        perceptronTable[perceptronIndex][ghistoryBits] += t;
+
+
+        for (int i = 0; i < ghistoryBits; i++) {
+            int xi = ((global_history >> i) & 1) ? 1 : -1; 
+            perceptronTable[perceptronIndex][i] += t * xi; 
         }
     }
     

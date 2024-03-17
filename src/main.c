@@ -49,7 +49,7 @@ handle_option(char *arg)
     sscanf(arg+13,"%d:%d:%d", &ghistoryBits, &lhistoryBits, &pcIndexBits);
   } else if (!strncmp(arg,"--custom:", 9)) {
     bpType = CUSTOM;
-    sscanf(arg+13,"%d:%d:%d", &ghistoryBits, &lhistoryBits, &pcIndexBits);
+    sscanf(arg+9,"%d:%d:%d", &ghistoryBits, &lhistoryBits, &pcIndexBits);
   } else if (!strcmp(arg,"--verbose")) {
     verbose = 1;
   } else {
